@@ -1,0 +1,10 @@
+{
+  "name": "@stijndepestel/aws-sam-turborepo-js-starter",
+  "version": "1.0.0",
+  "description": "AWS SAM project with turborepo",
+  "scripts": {
+  },
+  "author": "Stijn De Pestel <stijn.depestel@gmail.com>",
+  "license": "MIT",
+  "dependencies": {}
+}
