@@ -17,47 +17,60 @@ const TEMPLATE_STARTER_TEMP_FOLDER = './.template-starter-temp';
 const logger = winston.createLogger({
   transports: [new winston.transports.Console()],
   format: winston.format.combine(winston.format.simple(), winston.format.cli()),
-  levels: {
-    error: 0,
-    warn: 1,
-    info: 2,
-    verbose: 3,
-  },
 });
 
 const prompt = inquirer.createPromptModule();
 
 // Needs Git v2.22
 
-const exec = (command, showOutput = false) => {
-  const [cmd, ...args] = command.split(' ');
-  const {
-    status,
-    signal,
-    error,
-    stdout: output,
-    stderr: errOutput,
-  } = spawnSync(cmd, args, { stdio: showOutput ? 'inherit' : 'pipe' });
+const exec = (cmd, ...args) => {
+  logger.verbose(`${cmd} ${args.join(' ')}`);
+  const { status, signal, error, stdout: output, stderr: errOutput } = spawnSync(cmd, args, { stdio: 'pipe' });
 
   if (status !== 0) {
-    throw new Error(JSON.stringify({ status, signal, error, log: errOutput.toString() }));
+    throw new Error(JSON.stringify({ status, signal, error, log: errOutput.toString(), cmd, args }));
   }
 
-  return showOutput || output.toString();
+  return output.toString();
 };
 
 const removeTemplateGitDir = () => fs.rm(TEMPLATE_STARTER_TEMP_FOLDER, { recursive: true });
 
+const isEmptyBranch = () => {
+  try {
+    exec('git', '--no-pager', 'log');
+    return false;
+  } catch (e) {
+    return true;
+  }
+};
+
 const setup = async ({ repo, branch }) => {
   logger.info(`Using branch ${branch} from repository ${repo} as a template`);
-  exec('git init');
+  const starterRemoteName = 'template-starter';
+  exec('git', 'init');
   try {
-    const currentBranch = exec('git branch --show-current').trim();
-    exec(`git remote add -t ${branch} template-starter ${repo}`);
-    exec(`git pull --no-commit --depth 1 template-starter ${branch}:${currentBranch}`);
+    exec('git', 'remote', 'add', '-t', branch, starterRemoteName, repo);
+    exec('git', 'fetch', '--all');
+    // if there's no commits, we should checkout, otherwise we merge
+    if (isEmptyBranch()) {
+      const currentBranch = exec('git', 'branch', '--show-current').trim();
+      exec('git', 'pull', '--no-commit', '--depth', '1', starterRemoteName, `${branch}:${currentBranch}`);
+    } else {
+      exec(
+        'git',
+        'merge',
+        `${starterRemoteName}/${branch}`,
+        '--allow-unrelated-histories',
+        '--autostash',
+        `-m "Starting template ${repo} ${branch}"`,
+        '--no-stat',
+      );
+    }
   } finally {
-    exec(`git remote remove template-starter`);
+    exec('git', 'remote', 'remove', `${starterRemoteName}`);
   }
+
   logger.info(
     "Git has been initialized (if it was not already) and the template has been downloaded. Please refer to the template's README.MD for next steps.",
   );
@@ -65,8 +78,9 @@ const setup = async ({ repo, branch }) => {
 
 const getRepoBranchNames = async (repo) => {
   try {
-    exec(`git clone --bare ${repo} ${TEMPLATE_STARTER_TEMP_FOLDER}`);
-    const branches = exec(`git --git-dir=${TEMPLATE_STARTER_TEMP_FOLDER} branch -l --format='%(refname)'`)
+    await fs.mkdir(TEMPLATE_STARTER_TEMP_FOLDER);
+    exec('git', 'clone', '--bare', repo, TEMPLATE_STARTER_TEMP_FOLDER);
+    const branches = exec('git', `--git-dir=${TEMPLATE_STARTER_TEMP_FOLDER}`, 'branch', '-l', "--format='%(refname)'")
       .split('\n')
       .map((ref) => ref.replace(/'/g, ''))
       .filter((ref) => ref.length > 0)
@@ -102,7 +116,7 @@ const askSetupArgs = async () => {
     {
       type: 'input',
       name: 'repo',
-      message: 'Which repository should be used?',
+      message: 'Which repository should be used? (note: HTTP authentication is not yet supported)',
     },
   ]);
   const customRepoBranches = await getRepoBranchNames(repo, true);
@@ -121,7 +135,10 @@ const askSetupArgs = async () => {
 };
 
 const script = async (args) => {
-  const { guided } = args;
+  const { guided, verbose } = args;
+  if (verbose) {
+    logger.level = 'verbose';
+  }
   if (guided) {
     const setupArgs = await askSetupArgs();
     await setup(setupArgs);
@@ -138,7 +155,12 @@ const options = yargs(hideBin(process.argv))
     default: true,
     alias: 'g',
   })
-  .alias('h', 'help')
-  .alias('v', 'version').argv;
+  .option('verbose', {
+    description: 'Enable verbose logging.',
+    boolean: true,
+    default: false,
+    alias: 'v',
+  })
+  .alias('h', 'help').argv;
 
 script(options).catch(logger.error);

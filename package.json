@@ -1,6 +1,6 @@
 {
   "name": "@stijndepestel/create-with-template",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "NPM starter to create a project from a template",
   "scripts": {
     "lint": "eslint ."
